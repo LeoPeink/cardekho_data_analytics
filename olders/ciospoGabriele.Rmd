@@ -1,0 +1,234 @@
+---
+title: "Untitled"
+author: "Gruppo F"
+date: "29/6/2022"
+output: html_document
+---
+
+```{r echo = F}
+library(ggplot2)
+rm(list=ls()) # pulisci variabili
+if (! file.exists("cleanedCSV.csv")) {
+  source("clean_csv.R")
+  rm(list=ls()) # pulisci variabili
+}
+cleanedCSV <- read.csv("cleanedCSV.csv", header=TRUE)
+cleanedCSV$brand <- factor(cleanedCSV$brand)
+cleanedCSV$fuel <- factor(cleanedCSV$fuel)
+cleanedCSV$seller_type <- factor(cleanedCSV$seller_type)
+cleanedCSV$transmission <- factor(cleanedCSV$transmission)
+cleanedCSV$owner <- factor(cleanedCSV$owner)
+cleanedCSV$owner <- factor( # riordino i livelli
+  cleanedCSV$owner, levels=c(
+    "First Owner", "Second Owner", "Third Owner", "Fourth & Above Owner", "Test Drive Car"
+  )
+)
+cleanedCSV$seats <- factor(cleanedCSV$seats)
+cleanedNA <- na.omit(cleanedCSV)
+```
+
+# Asimmetrie e code pesanti
+
+
+
+Il valore di curtosi maggiore di 3 ci indica che la curva risulta più 'appuntita' di una Normale, nel nostro caso lo supera di una unità, una differenza quindi non trascurabile e decisamente evidente.
+Il valore di simmetria sensibilmente maggiore di 0 ci conferma la nostra ipotesi precedente. La curva ha una coda destra più pesante della sinistra seppur in quantità non elevata.
+
+
+
+# Quali case automobilistiche sono maggiormente uniformate ai trend di mercato?
+
+```{r, echo=FALSE}
+library(TTR)
+df<-cleanedNA
+
+
+aumento_medio <- function(lista){
+  aumenti <- c();
+  # Calcola gli incrementi tra un valore ed il successivo
+  for( i in 1:length(lista)-1 ){
+    aumenti <- c(aumenti, (lista[i+1]/lista[1])-1 );
+  }
+  # Calcola la media tra tutti gli incrementi
+  aumento <- mean(aumenti);
+  return(aumento)
+}
+
+
+# Tipo di cambio
+transmission_fun <- function(df,show=FALSE){
+  # Calcola la suddivisione di mercato tra automatiche e manuali per ogni anno
+  table_transmission <- 100*prop.table(table(df$transmission,df$year),2);
+  if(show){
+    barplot(table_transmission)
+  }
+  return(table_transmission);
+}
+
+# Cilindrata
+means_engine_fun <- function(df,show=FALSE){
+  # Calcola la media per ogni anno
+  means_engine <- aggregate(df$engine,unique(list(df$year)),mean)
+  colnames(means_engine) <- c("year","engine")
+  # Calcola la media mobile semplice delle medie precedenti
+  means_engine$engine_SMA <- SMA(means_engine$engine,n=3)
+  # Calcola l'incremento medio tra un anno ed il successivo
+  avg_change_engine <- aumento_medio(means_engine$engine_SMA[!is.na(means_engine$engine_SMA)]);
+  if(show){
+    plot(data=means_engine, engine_SMA~year , xlab="Anno", ylab="Cilindrata")
+  }
+  res <- list(
+    "avg_change" = avg_change_engine,
+    "means" = means_engine
+  )
+  return(res);
+}
+# Consumo di carburante
+means_mileage_fun <- function(df_l,show=FALSE){
+  # Calcola la media per ogni anno nel caso di carburante diesel o benzina rispettivamente
+  means_mileage_Diesel <- aggregate( df_l$mileage[df_l$fuel=="Diesel"]  ,list(df_l$year[df_l$fuel=="Diesel"]) ,mean, na.action= na.omit)
+  means_mileage_Petrol <- aggregate( df_l$mileage[df_l$fuel=="Petrol"]  ,list(df_l$year[df_l$fuel=="Petrol"]) ,mean, na.action= na.omit)
+  colnames(means_mileage_Diesel)  <- c("year","mileage")
+  colnames(means_mileage_Petrol)  <- c("year","mileage")
+  # Calcola la media mobile semplice
+  means_mileage_Diesel$mileage_SMA  <- SMA( means_mileage_Diesel$mileage ,n=2)
+  means_mileage_Petrol$mileage_SMA  <- SMA( means_mileage_Petrol$mileage ,n=2)
+  # Calcola l'incremento medio 
+  avg_change_mileage_Diesel  <- aumento_medio( means_mileage_Diesel$mileage_SMA[!is.na(means_mileage_Diesel$mileage_SMA)] );
+  avg_change_mileage_Petrol  <- aumento_medio( means_mileage_Petrol$mileage_SMA[!is.na(means_mileage_Petrol$mileage_SMA)] );
+  
+  if(show){
+    par(mfrow=c(1,2))
+    plot( data=means_mileage_Diesel , mileage_SMA~year , xlab="Anno", ylab="Consumo", main="Diesel" , sub=paste("Aumento medio: ",round(100*avg_change_mileage_Diesel ,1),"%") )
+    plot( data=means_mileage_Petrol , mileage_SMA~year , xlab="Anno", ylab="Consumo", main="Petrol" , sub=paste("Aumento medio: ",round(100*avg_change_mileage_Petrol ,1),"%") )
+  }
+  means_mileage <- list(
+    "Diesel" = means_mileage_Diesel,
+    "Petrol" = means_mileage_Petrol
+  )
+  avg_change_mileage <- list(
+    "Diesel" = avg_change_mileage_Diesel,
+    "Petrol" = avg_change_mileage_Petrol
+  )
+  res <- list(
+    "avg_change" = avg_change_mileage,
+    "means" = means_mileage
+  )
+  return(res);
+}
+
+# Coppia
+means_torque_fun <- function(df,show=FALSE){
+  # Calcola la media per ogni anno
+  means_torque <- aggregate(df$torque,unique(list(df$year)),mean)
+  colnames(means_torque) <- c("year","torque");
+  # Calcola la media mobile semplice delle medie precedenti
+  means_torque$torque_SMA <- SMA(means_torque$torque,n=3)
+  # Calcola l'incremento medio tra un anno ed il successivo
+  avg_change_torque <- aumento_medio(means_torque$torque_SMA[!is.na(means_torque$torque_SMA)]);
+  if(show){
+    plot(data=means_torque, torque_SMA~year , xlab="Anno", ylab="Coppia")  
+  }
+  res <- list(
+    "avg_change" = avg_change_torque,
+    "means" = means_torque
+  )
+  return(res);
+}
+# Potenza
+means_max_power_fun <- function(df,show=FALSE){
+  # Calcola la media per ogni anno
+  means_max_power <- aggregate(df$max_power,list(df$year),mean)
+  colnames(means_max_power) <- c("year","max_power");
+  # Calcola la media mobile semplice delle medie precedenti
+  means_max_power$max_power_SMA <- SMA(means_max_power$max_power,n=3)
+  # Calcola l'incremento medio tra un anno ed il successivo
+  avg_change_max_power <- aumento_medio(means_max_power$max_power_SMA[!is.na(means_max_power$max_power_SMA)]);
+  if(show){
+    plot(data=means_max_power, max_power_SMA~year , xlab="Anno", ylab="Potenza")  
+  }
+  res <- list(
+    "avg_change" = avg_change_max_power,
+    "means" = means_max_power
+  )
+  return(res);
+}
+```
+
+Vediamo quali sono i principali marchi di auto per numero di auto prodotte
+```{r}
+brands <- unique(df$brand)
+cars_n <- c();
+for(brand in brands){
+  L <- length(df$brand[df$brand==brand])
+  cars_n <- c(cars_n,L)
+}
+df_new <- data.frame('brand'=brands,'cars'=cars_n)
+df_new <- df_new[order(df_new$cars,decreasing=T),]
+```
+
+
+Analizziamo lo share di mercato dei vari marchi
+
+```{r}
+df_new$share <- 100 * df_new$cars/sum(df_new$cars)
+df_new$cumulative_share <- cumsum(df_new$share)
+
+df_new
+```
+
+Scegliamo di considerare i primi tre marchi in quanti essi costituiscono più del 75% del mercato totale
+
+```{r}
+brands <- as.vector(head( df_new , n=6 )$brand)
+```
+
+
+```{r}
+res <- list()
+for(brand in brands){
+  res[[brand]] <- list(
+    "engine" = means_engine_fun(df[df$brand==brand,]),
+    "mileage" = means_mileage_fun(df[df$brand==brand,]),
+    "max_power" = means_max_power_fun(df[df$brand==brand,])
+  )
+}
+
+```
+
+Consideriamo anche il mercato totale
+
+```{r}
+res[['Market']] <- list(
+  "engine" = means_engine_fun(df),
+  "mileage" = means_mileage_fun(df),
+  "max_power" = means_max_power_fun(df)
+)
+```
+
+Dal momento che il primo marchio costituisce il 30% del mercato, ci aspettiamo che i suoi trend siano simili a quelli del mercato totale 
+```{r}
+
+# engine
+plot( data=res$Market$engine$means,   engine_SMA~year , xlab = "Anno", ylab = "Cilindrata", main="Mercato totale" )
+
+par(mfrow=c(2,3))
+plot( data=res$Maruti$engine$means,   engine_SMA~year , xlab = "Anno", ylab = "Cilindrata", main="Maruti")
+plot( data=res$Hyundai$engine$means,  engine_SMA~year , xlab = "Anno", ylab = "Cilindrata", main="Hyundai")
+plot( data=res$Mahindra$engine$means, engine_SMA~year , xlab = "Anno", ylab = "Cilindrata", main="Mahindra")
+plot( data=res$Tata$engine$means,     engine_SMA~year , xlab = "Anno", ylab = "Cilindrata", main="Tata")
+plot( data=res$Honda$engine$means,    engine_SMA~year , xlab = "Anno", ylab = "Cilindrata", main="Honda")
+plot( data=res$Toyota$engine$means,   engine_SMA~year , xlab = "Anno", ylab = "Cilindrata", main="Toyota")
+
+# mileage
+plot( data=res$Market$mileage$means$Diesel,   mileage_SMA~year , xlab = "Anno", ylab = "Cilindrata", main="Mercato totale" )
+
+par(mfrow=c(2,3))
+plot( data=res$Maruti$mileage$means$Diesel,   mileage_SMA~year , xlab = "Anno", ylab = "Cilindrata", main="Maruti")
+plot( data=res$Hyundai$mileage$means$Diesel,  mileage_SMA~year , xlab = "Anno", ylab = "Cilindrata", main="Hyundai")
+plot( data=res$Mahindra$mileage$means$Diesel, mileage_SMA~year , xlab = "Anno", ylab = "Cilindrata", main="Mahindra")
+plot( data=res$Tata$mileage$means$Diesel,     mileage_SMA~year , xlab = "Anno", ylab = "Cilindrata", main="Tata")
+plot( data=res$Honda$mileage$means$Diesel,    mileage_SMA~year , xlab = "Anno", ylab = "Cilindrata", main="Honda")
+plot( data=res$Toyota$mileage$means$Diesel,   mileage_SMA~year , xlab = "Anno", ylab = "Cilindrata", main="Toyota")
+
+```
